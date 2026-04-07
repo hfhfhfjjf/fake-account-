@@ -8,10 +8,8 @@ admin.initializeApp({
   databaseURL: "https://starx-network-default-rtdb.firebaseio.com" 
 });
 
-const TARGET_USERNAME = "xcq510";
-
-async function deleteAllSpamAccounts() {
-  console.log(`\n🛑 Deletion Started for ALL referrals of: ${TARGET_USERNAME}...`);
+async function countKycVerifiedUsers() {
+  console.log(`\n🔍 Scanning Realtime Database to count KYC Verified users...`);
   
   try {
     const db = admin.database();
@@ -26,46 +24,32 @@ async function deleteAllSpamAccounts() {
       process.exit(0);
     }
 
-    // UIDs jama karne ke liye array
-    let uidsToDelete = [];
+    let kycVerifiedCount = 0;
+    let totalUsersCount = 0;
 
     // Har user ka data check karein
     for (const [uid, userData] of Object.entries(usersData)) {
-      if (userData && userData.referredBy === TARGET_USERNAME) {
-        uidsToDelete.push(uid);
-      }
-    }
-    
-    if (uidsToDelete.length === 0) {
-        console.log(`\n✅ Safe: Username '${TARGET_USERNAME}' ka koi referral database mein nahi mila.`);
-        process.exit(0);
-    }
-
-    console.log(`\n⚠️ Total fake accounts found: ${uidsToDelete.length}. Deleting ALL...`);
-
-    // Firebase Auth ki 1000 UIDs ki API limit ko handle karne ke liye internal loop
-    for (let i = 0; i < uidsToDelete.length; i += 1000) {
-      const chunk = uidsToDelete.slice(i, i + 1000);
+      totalUsersCount++;
       
-      // 1. Authentication se delete karein
-      await admin.auth().deleteUsers(chunk);
-
-      // 2. Realtime Database se sirf in UIDs ka data delete karein
-      for (const uid of chunk) {
-         await db.ref(`users/${uid}`).remove();
+      // Check karein ke kya user kycVerified hai (screenshot ke mutabiq yeh boolean 'true' hai)
+      if (userData && userData.kycVerified === true) {
+        kycVerifiedCount++;
       }
     }
 
     console.log(`\n=========================================`);
-    console.log(`🎉 COMPLETELY DELETED!`);
-    console.log(`All ${uidsToDelete.length} fake accounts referred by '${TARGET_USERNAME}' have been permanently removed.`);
+    console.log(`✅ KYC VERIFICATION REPORT`);
+    console.log(`=========================================`);
+    console.log(`Total Users in Database : ${totalUsersCount}`);
+    console.log(`Total KYC Verified      : ${kycVerifiedCount}`);
+    console.log(`Pending/Unverified      : ${totalUsersCount - kycVerifiedCount}`);
     console.log(`=========================================\n`);
     
     process.exit(0); 
   } catch (error) {
-    console.error('❌ Error during deletion process:', error);
+    console.error('❌ Error fetching data from Realtime Database:', error);
     process.exit(1);
   }
 }
 
-deleteAllSpamAccounts();
+countKycVerifiedUsers();
