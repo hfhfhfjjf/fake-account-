@@ -10,8 +10,8 @@ admin.initializeApp({
 
 const TARGET_USERNAME = "xcq510";
 
-async function countAllReferrals() {
-  console.log(`Scanning Realtime Database to find ALL referrals for: ${TARGET_USERNAME}...`);
+async function deleteAllSpamAccounts() {
+  console.log(`\n🛑 Deletion Started for ALL referrals of: ${TARGET_USERNAME}...`);
   
   try {
     const db = admin.database();
@@ -26,49 +26,46 @@ async function countAllReferrals() {
       process.exit(0);
     }
 
-    let totalReferrals = 0;
-    let referredUsersList = [];
+    // UIDs jama karne ke liye array
+    let uidsToDelete = [];
 
     // Har user ka data check karein
     for (const [uid, userData] of Object.entries(usersData)) {
-      
-      // Agar referredBy xcq510 hai
       if (userData && userData.referredBy === TARGET_USERNAME) {
-        totalReferrals++;
-        
-        referredUsersList.push({
-            UID: uid,
-            Username: userData.username || "N/A",
-            Email: userData.email || "No Email",
-            FullName: userData.fullName || "N/A"
-        });
+        uidsToDelete.push(uid);
       }
     }
     
-    console.log(`\n=========================================`);
-    console.log(`📊 REFERRAL REPORT FOR: ${TARGET_USERNAME}`);
-    console.log(`=========================================`);
-    console.log(`Total Referrals found: ${totalReferrals}`);
-    console.log(`=========================================\n`);
-    
-    if (totalReferrals > 0) {
-        console.log(`📋 Referral Details:`);
-        // Limit output so GitHub Actions log doesn't crash if there are thousands
-        if (totalReferrals > 500) {
-           console.log(`Showing first 500 records...`);
-           console.table(referredUsersList.slice(0, 500));
-        } else {
-           console.table(referredUsersList);
-        }
-    } else {
-        console.log(`Koi referral nahi mila is user ka.`);
+    if (uidsToDelete.length === 0) {
+        console.log(`\n✅ Safe: Username '${TARGET_USERNAME}' ka koi referral database mein nahi mila.`);
+        process.exit(0);
     }
+
+    console.log(`\n⚠️ Total fake accounts found: ${uidsToDelete.length}. Deleting ALL...`);
+
+    // Firebase Auth ki 1000 UIDs ki API limit ko handle karne ke liye internal loop
+    for (let i = 0; i < uidsToDelete.length; i += 1000) {
+      const chunk = uidsToDelete.slice(i, i + 1000);
+      
+      // 1. Authentication se delete karein
+      await admin.auth().deleteUsers(chunk);
+
+      // 2. Realtime Database se sirf in UIDs ka data delete karein
+      for (const uid of chunk) {
+         await db.ref(`users/${uid}`).remove();
+      }
+    }
+
+    console.log(`\n=========================================`);
+    console.log(`🎉 COMPLETELY DELETED!`);
+    console.log(`All ${uidsToDelete.length} fake accounts referred by '${TARGET_USERNAME}' have been permanently removed.`);
+    console.log(`=========================================\n`);
     
     process.exit(0); 
   } catch (error) {
-    console.error('Error fetching data from Realtime Database:', error);
+    console.error('❌ Error during deletion process:', error);
     process.exit(1);
   }
 }
 
-countAllReferrals();
+deleteAllSpamAccounts();
