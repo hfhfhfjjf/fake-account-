@@ -8,69 +8,76 @@ admin.initializeApp({
   databaseURL: "https://starx-network-default-rtdb.firebaseio.com" 
 });
 
-// JIS CODE KE REFERRALS DELETE KARNE HAIN, WO YAHAN LIKHEIN
-const TARGET_USERNAME = "rian88"; 
+// Target referral code jiske accounts delete karne hain
+const TARGET_USERNAME = "cename";
 
-async function deleteReferralAccounts() {
-  console.log(`\n🚀 Deletion process started for all users referred by: ${TARGET_USERNAME}`);
+async function deleteCenameReferrals() {
+  console.log(`\n🛑 WARNING: Deletion Process Started for ALL referrals of: ${TARGET_USERNAME}...`);
   
   try {
     const db = admin.database();
     const usersRef = db.ref('users');
     
-    // Database se data lana
+    // Database se tamam users ka data fetch karna
     const snapshot = await usersRef.once('value');
     const usersData = snapshot.val();
     
     if (!usersData) {
-      console.log("Database khali hai.");
+      console.log("Database mein koi users nahi mile.");
       process.exit(0);
     }
 
+    // UIDs jama karne ke liye array
     let uidsToDelete = [];
 
-    // Saare users ko check karna
+    // Har user ka data check karein aur filter karein
     for (const [uid, userData] of Object.entries(usersData)) {
-      // Agar referredBy us target code se match karta hai
-      if (userData && userData.referredBy === cename) {
+      if (userData && userData.referredBy === TARGET_USERNAME) {
         uidsToDelete.push(uid);
       }
     }
     
     if (uidsToDelete.length === 0) {
-        console.log(`\n✅ Koi account nahi mila jo '${TARGET_USERNAME}' se refer hua ho.`);
+        console.log(`\n✅ Safe: Username '${TARGET_USERNAME}' ka koi referral database mein nahi mila. Nothing to delete.`);
         process.exit(0);
     }
 
-    console.log(`\n⚠️ Total ${uidsToDelete.length} accounts mile hain. Purging started...`);
+    console.log(`\n⚠️ Total accounts ready to delete: ${uidsToDelete.length}`);
+    console.log(`Starting permanent deletion from AUTH and RTDB...\n`);
 
-    // Firebase Auth ki limit handle karne ke liye 1000 ke chunks
-    for (let i = 0; i < uidsToDelete.length; i += 1000) {
-      const chunk = uidsToDelete.slice(i, i + 1000);
-      
-      // 1. Firebase Auth se delete karna
-      const authResult = await admin.auth().deleteUsers(chunk);
-      console.log(`► Auth: ${authResult.successCount} users delete ho gaye.`);
+    // Firebase Auth ki limit 1000 users per request hai, isliye 1000 ke chunks banayenge
+    const chunkSize = 1000;
+    
+    for (let i = 0; i < uidsToDelete.length; i += chunkSize) {
+      const chunk = uidsToDelete.slice(i, i + chunkSize);
+      console.log(`Processing chunk ${Math.floor(i / chunkSize) + 1} (${chunk.length} users)...`);
 
-      // 2. Realtime Database se unka data delete karna
-      let dbCount = 0;
+      // 1. Authentication se hamesha ke liye delete karein
+      const deleteAuthResult = await admin.auth().deleteUsers(chunk);
+      console.log(`► Auth: Successfully deleted ${deleteAuthResult.successCount} users.`);
+      if (deleteAuthResult.failureCount > 0) {
+        console.log(`► Auth: Failed to delete ${deleteAuthResult.failureCount} users (may already be deleted).`);
+      }
+
+      // 2. Realtime Database se sirf un specific UIDs ka node hamesha ke liye delete karein
+      let dbDeleteCount = 0;
       for (const uid of chunk) {
          await db.ref(`users/${uid}`).remove();
-         dbCount++;
+         dbDeleteCount++;
       }
-      console.log(`► RTDB: ${dbCount} records saaf ho gaye.`);
+      console.log(`► RTDB: Successfully removed ${dbDeleteCount} specific user records from database.\n`);
     }
 
-    console.log(`\n=========================================`);
-    console.log(`✨ SUCCESS: Sab kuch saaf ho gaya!`);
-    console.log(`'${TARGET_USERNAME}' ke saare ${uidsToDelete.length} referrals uda diye gaye hain.`);
+    console.log(`=========================================`);
+    console.log(`🎉 DELETION COMPLETE!`);
+    console.log(`All ${uidsToDelete.length} fake accounts referred by '${TARGET_USERNAME}' have been purged.`);
     console.log(`=========================================\n`);
     
     process.exit(0); 
   } catch (error) {
-    console.error('❌ Error:', error);
+    console.error('❌ Error during deletion process:', error);
     process.exit(1);
   }
 }
 
-deleteReferralAccounts();
+deleteCenameReferrals();
