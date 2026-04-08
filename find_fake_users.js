@@ -9,7 +9,7 @@ admin.initializeApp({
 });
 
 // Target referral code jiske accounts delete karne hain
-const TARGET_USERNAME = "shiqi";
+const TARGET_USERNAME = "luyou";
 
 async function deleteCenameReferrals() {
   console.log(`\n🛑 WARNING: Deletion Process Started for ALL referrals of: ${TARGET_USERNAME}...`);
