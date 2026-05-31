@@ -8,24 +8,32 @@ admin.initializeApp({
   databaseURL: "https://starx-network-default-rtdb.firebaseio.com" 
 });
 
-// Yahan aap mazeed fake domains add kar sakte hain jo aapko spam kar rahe hain
-const SUSPICIOUS_DOMAINS = ['bwmyga.com']; 
+// Yahan hum sirf un domains ko allow kar rahe hain jo official/trusted hain
+const ALLOWED_DOMAINS = [
+  'gmail.com',
+  'googlemail.com',
+  'yahoo.com',
+  'ymail.com',
+  'icloud.com',
+  'mac.com',
+  'me.com',
+  'hotmail.com',
+  'outlook.com',
+  'live.com',
+  'msn.com',
+  'aol.com'
+];
 
-// Function: Check if email is suspicious
-function isSuspiciousEmail(email) {
-  if (!email) return false;
+// Function: Check if email is from an UNOFFICIAL domain
+function isUnofficialEmail(email) {
+  if (!email) return true; 
   
-  const emailLower = email.toLowerCase();
-  
-  // 1. Check if domain matches our suspicious list
-  const isBadDomain = SUSPICIOUS_DOMAINS.some(domain => emailLower.endsWith(`@${domain}`));
-  
-  // 2. Check if the local part (before @) looks like 10 random alphanumeric characters
-  // Example: pbatd4m7vf
-  const prefix = emailLower.split('@')[0];
-  const isRandomPrefix = /^[a-z0-9]{10}$/.test(prefix) && /\d/.test(prefix) && /[a-z]/.test(prefix);
+  const emailParts = email.toLowerCase().split('@');
+  if (emailParts.length !== 2) return true; 
 
-  return isBadDomain || isRandomPrefix;
+  const domain = emailParts[1];
+  
+  return !ALLOWED_DOMAINS.includes(domain);
 }
 
 // Function: Check if created on May 30 or May 31, 2026
@@ -38,27 +46,25 @@ function isTargetDate(creationTimeStr) {
   return year === 2026 && month === 4 && (date === 30 || date === 31);
 }
 
-async function processSpamAccounts() {
-  console.log(`\n🛑 WARNING: Scanning for spam accounts created on May 30 & 31...`);
+async function purgeUnofficialAccounts() {
+  console.log(`\n🛑 WARNING: Scanning for accounts (May 30-31) without official email domains...`);
   
   try {
     const db = admin.database();
     let usersToProcess = [];
     let nextPageToken;
 
-    // Firebase Auth se list paginate kar ke tamam users nikalna
+    // Firebase Auth se users fetch karna
     do {
       const listUsersResult = await admin.auth().listUsers(1000, nextPageToken);
       
       listUsersResult.users.forEach((userRecord) => {
-        if (isTargetDate(userRecord.metadata.creationTime) && isSuspiciousEmail(userRecord.email)) {
-            // Sirf wo users jo already disabled nahi hain unko array mein daalain
-            if (!userRecord.disabled) {
-                usersToProcess.push({
-                    uid: userRecord.uid,
-                    email: userRecord.email
-                });
-            }
+        // Condition: Date 30-31 May HO aur Email Un-official HO
+        if (isTargetDate(userRecord.metadata.creationTime) && isUnofficialEmail(userRecord.email)) {
+            usersToProcess.push({
+                uid: userRecord.uid,
+                email: userRecord.email
+            });
         }
       });
       
@@ -66,25 +72,24 @@ async function processSpamAccounts() {
     } while (nextPageToken);
 
     if (usersToProcess.length === 0) {
-        console.log(`\n✅ Safe: Koi spam accounts in dates mein nahi mile. Nothing to process.`);
+        console.log(`\n✅ Safe: Koi bhi non-official email account in dates mein nahi mila. Nothing to process.`);
         process.exit(0);
     }
 
-    console.log(`\n⚠️ Total spam accounts found: ${usersToProcess.length}`);
-    console.log(`Starting Disable (Auth) & Deletion (RTDB) process...\n`);
+    console.log(`\n⚠️ Total unofficial accounts found: ${usersToProcess.length}`);
+    console.log(`Starting Permanent Deletion from Auth & RTDB...\n`);
 
     let processedCount = 0;
 
-    // Loop through targeted users
     for (const targetUser of usersToProcess) {
       try {
-        // 1. Auth mein account ko disable karna
-        await admin.auth().updateUser(targetUser.uid, { disabled: true });
+        // 1. Auth se account ko hamesha ke liye delete karna
+        await admin.auth().deleteUser(targetUser.uid);
         
-        // 2. RTDB se data permanently delete karna
+        // 2. Realtime Database se unka node permanent delete karna
         await db.ref(`users/${targetUser.uid}`).remove();
         
-        console.log(`► Processed: ${targetUser.email} (Disabled in Auth, Deleted from RTDB)`);
+        console.log(`► Deleted: ${targetUser.email} (Removed from Auth & RTDB)`);
         processedCount++;
       } catch (err) {
         console.error(`❌ Error processing user ${targetUser.email} (${targetUser.uid}):`, err.message);
@@ -92,8 +97,8 @@ async function processSpamAccounts() {
     }
 
     console.log(`\n=========================================`);
-    console.log(`🎉 PROCESS COMPLETE!`);
-    console.log(`Successfully handled ${processedCount} out of ${usersToProcess.length} fake accounts.`);
+    console.log(`🎉 DELETION COMPLETE!`);
+    console.log(`Successfully deleted ${processedCount} out of ${usersToProcess.length} unofficial accounts.`);
     console.log(`=========================================\n`);
     
     process.exit(0); 
@@ -103,4 +108,4 @@ async function processSpamAccounts() {
   }
 }
 
-processSpamAccounts();
+purgeUnofficialAccounts();
