@@ -8,76 +8,99 @@ admin.initializeApp({
   databaseURL: "https://starx-network-default-rtdb.firebaseio.com" 
 });
 
-// Target referral code jiske accounts delete karne hain
-const TARGET_USERNAME = "shiqi";
+// Yahan aap mazeed fake domains add kar sakte hain jo aapko spam kar rahe hain
+const SUSPICIOUS_DOMAINS = ['bwmyga.com']; 
 
-async function deleteCenameReferrals() {
-  console.log(`\n🛑 WARNING: Deletion Process Started for ALL referrals of: ${TARGET_USERNAME}...`);
+// Function: Check if email is suspicious
+function isSuspiciousEmail(email) {
+  if (!email) return false;
+  
+  const emailLower = email.toLowerCase();
+  
+  // 1. Check if domain matches our suspicious list
+  const isBadDomain = SUSPICIOUS_DOMAINS.some(domain => emailLower.endsWith(`@${domain}`));
+  
+  // 2. Check if the local part (before @) looks like 10 random alphanumeric characters
+  // Example: pbatd4m7vf
+  const prefix = emailLower.split('@')[0];
+  const isRandomPrefix = /^[a-z0-9]{10}$/.test(prefix) && /\d/.test(prefix) && /[a-z]/.test(prefix);
+
+  return isBadDomain || isRandomPrefix;
+}
+
+// Function: Check if created on May 30 or May 31, 2026
+function isTargetDate(creationTimeStr) {
+  const creationDate = new Date(creationTimeStr);
+  const year = creationDate.getFullYear();
+  const month = creationDate.getMonth(); // 4 = May (0-indexed)
+  const date = creationDate.getDate();
+
+  return year === 2026 && month === 4 && (date === 30 || date === 31);
+}
+
+async function processSpamAccounts() {
+  console.log(`\n🛑 WARNING: Scanning for spam accounts created on May 30 & 31...`);
   
   try {
     const db = admin.database();
-    const usersRef = db.ref('users');
-    
-    // Database se tamam users ka data fetch karna
-    const snapshot = await usersRef.once('value');
-    const usersData = snapshot.val();
-    
-    if (!usersData) {
-      console.log("Database mein koi users nahi mile.");
-      process.exit(0);
-    }
+    let usersToProcess = [];
+    let nextPageToken;
 
-    // UIDs jama karne ke liye array
-    let uidsToDelete = [];
+    // Firebase Auth se list paginate kar ke tamam users nikalna
+    do {
+      const listUsersResult = await admin.auth().listUsers(1000, nextPageToken);
+      
+      listUsersResult.users.forEach((userRecord) => {
+        if (isTargetDate(userRecord.metadata.creationTime) && isSuspiciousEmail(userRecord.email)) {
+            // Sirf wo users jo already disabled nahi hain unko array mein daalain
+            if (!userRecord.disabled) {
+                usersToProcess.push({
+                    uid: userRecord.uid,
+                    email: userRecord.email
+                });
+            }
+        }
+      });
+      
+      nextPageToken = listUsersResult.pageToken;
+    } while (nextPageToken);
 
-    // Har user ka data check karein aur filter karein
-    for (const [uid, userData] of Object.entries(usersData)) {
-      if (userData && userData.referredBy === TARGET_USERNAME) {
-        uidsToDelete.push(uid);
-      }
-    }
-    
-    if (uidsToDelete.length === 0) {
-        console.log(`\n✅ Safe: Username '${TARGET_USERNAME}' ka koi referral database mein nahi mila. Nothing to delete.`);
+    if (usersToProcess.length === 0) {
+        console.log(`\n✅ Safe: Koi spam accounts in dates mein nahi mile. Nothing to process.`);
         process.exit(0);
     }
 
-    console.log(`\n⚠️ Total accounts ready to delete: ${uidsToDelete.length}`);
-    console.log(`Starting permanent deletion from AUTH and RTDB...\n`);
+    console.log(`\n⚠️ Total spam accounts found: ${usersToProcess.length}`);
+    console.log(`Starting Disable (Auth) & Deletion (RTDB) process...\n`);
 
-    // Firebase Auth ki limit 1000 users per request hai, isliye 1000 ke chunks banayenge
-    const chunkSize = 1000;
-    
-    for (let i = 0; i < uidsToDelete.length; i += chunkSize) {
-      const chunk = uidsToDelete.slice(i, i + chunkSize);
-      console.log(`Processing chunk ${Math.floor(i / chunkSize) + 1} (${chunk.length} users)...`);
+    let processedCount = 0;
 
-      // 1. Authentication se hamesha ke liye delete karein
-      const deleteAuthResult = await admin.auth().deleteUsers(chunk);
-      console.log(`► Auth: Successfully deleted ${deleteAuthResult.successCount} users.`);
-      if (deleteAuthResult.failureCount > 0) {
-        console.log(`► Auth: Failed to delete ${deleteAuthResult.failureCount} users (may already be deleted).`);
+    // Loop through targeted users
+    for (const targetUser of usersToProcess) {
+      try {
+        // 1. Auth mein account ko disable karna
+        await admin.auth().updateUser(targetUser.uid, { disabled: true });
+        
+        // 2. RTDB se data permanently delete karna
+        await db.ref(`users/${targetUser.uid}`).remove();
+        
+        console.log(`► Processed: ${targetUser.email} (Disabled in Auth, Deleted from RTDB)`);
+        processedCount++;
+      } catch (err) {
+        console.error(`❌ Error processing user ${targetUser.email} (${targetUser.uid}):`, err.message);
       }
-
-      // 2. Realtime Database se sirf un specific UIDs ka node hamesha ke liye delete karein
-      let dbDeleteCount = 0;
-      for (const uid of chunk) {
-         await db.ref(`users/${uid}`).remove();
-         dbDeleteCount++;
-      }
-      console.log(`► RTDB: Successfully removed ${dbDeleteCount} specific user records from database.\n`);
     }
 
-    console.log(`=========================================`);
-    console.log(`🎉 DELETION COMPLETE!`);
-    console.log(`All ${uidsToDelete.length} fake accounts referred by '${TARGET_USERNAME}' have been purged.`);
+    console.log(`\n=========================================`);
+    console.log(`🎉 PROCESS COMPLETE!`);
+    console.log(`Successfully handled ${processedCount} out of ${usersToProcess.length} fake accounts.`);
     console.log(`=========================================\n`);
     
     process.exit(0); 
   } catch (error) {
-    console.error('❌ Error during deletion process:', error);
+    console.error('❌ Error during the scanning process:', error);
     process.exit(1);
   }
 }
 
-deleteCenameReferrals();
+processSpamAccounts();
