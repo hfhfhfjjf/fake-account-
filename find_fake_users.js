@@ -8,39 +8,22 @@ admin.initializeApp({
   databaseURL: "https://starx-network-default-rtdb.firebaseio.com" 
 });
 
-// Function: Check if email is suspicious (Dot trick, Plus trick, or QQ domain)
-function isSuspiciousEmailPattern(email) {
+// Function: Check if email is from qq.com domain ONLY
+function isQQDomainEmail(email) {
   if (!email) return false;
   
   const emailLower = email.toLowerCase();
   const parts = emailLower.split('@');
   if (parts.length !== 2) return false;
 
-  const localPart = parts[0];
   const domain = parts[1];
 
-  // 1. Check for QQ.com domain (Spam domain)
-  if (domain === 'qq.com') {
-    return true;
-  }
-
-  // 2. Check for Gmail Tricks
-  if (domain === 'gmail.com' || domain === 'googlemail.com') {
-    // Plus Trick: Check if it contains '+'
-    const hasPlus = localPart.includes('+');
-    
-    // Dot Trick: Check if local part has 2 or more dots
-    const dotCount = (localPart.match(/\./g) || []).length;
-    const tooManyDots = dotCount >= 2;
-
-    return hasPlus || tooManyDots;
-  }
-  
-  return false;
+  // Sirf qq.com check hoga
+  return domain === 'qq.com';
 }
 
-async function purgeAllFakesAndDisableReferrers() {
-  console.log(`\n🛑 WARNING: Scanning ALL accounts for dot/plus tricks & qq.com...`);
+async function purgeQQFakesAndDisableReferrers() {
+  console.log(`\n🛑 WARNING: Scanning ALL accounts for qq.com domain only...`);
   
   try {
     const db = admin.database();
@@ -52,7 +35,7 @@ async function purgeAllFakesAndDisableReferrers() {
       const listUsersResult = await admin.auth().listUsers(1000, nextPageToken);
       
       listUsersResult.users.forEach((userRecord) => {
-        if (isSuspiciousEmailPattern(userRecord.email)) {
+        if (isQQDomainEmail(userRecord.email)) {
             fakeUsersToProcess.push({
                 uid: userRecord.uid,
                 email: userRecord.email
@@ -64,11 +47,11 @@ async function purgeAllFakesAndDisableReferrers() {
     } while (nextPageToken);
 
     if (fakeUsersToProcess.length === 0) {
-        console.log(`\n✅ Safe: Koi "Dot/Plus Trick" ya "qq.com" wale accounts nahi mile.`);
+        console.log(`\n✅ Safe: Koi "qq.com" wale accounts nahi mile.`);
         process.exit(0);
     }
 
-    console.log(`\n⚠️ Total fake accounts found globally: ${fakeUsersToProcess.length}`);
+    console.log(`\n⚠️ Total qq.com accounts found globally: ${fakeUsersToProcess.length}`);
     console.log(`Starting process to Delete Fakes & Disable their Referrers...\n`);
 
     let processedFakes = 0;
@@ -103,7 +86,7 @@ async function purgeAllFakesAndDisableReferrers() {
     }
 
     console.log(`\n=========================================`);
-    console.log(`🔥 Deletion Complete: ${processedFakes} fake accounts removed.`);
+    console.log(`🔥 Deletion Complete: ${processedFakes} qq.com accounts removed.`);
     console.log(`=========================================\n`);
     
     // 3. Disable the main culprits (Referrers)
@@ -143,4 +126,4 @@ async function purgeAllFakesAndDisableReferrers() {
   }
 }
 
-purgeAllFakesAndDisableReferrers();
+purgeQQFakesAndDisableReferrers();
