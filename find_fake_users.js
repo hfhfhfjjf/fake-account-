@@ -8,8 +8,8 @@ admin.initializeApp({
   databaseURL: "https://starx-network-default-rtdb.firebaseio.com" 
 });
 
-// Function: Check if email uses the "Dot Trick" or "Plus Trick"
-function isSuspiciousGmailPattern(email) {
+// Function: Check if email is suspicious (Dot trick, Plus trick, or QQ domain)
+function isSuspiciousEmailPattern(email) {
   if (!email) return false;
   
   const emailLower = email.toLowerCase();
@@ -19,12 +19,17 @@ function isSuspiciousGmailPattern(email) {
   const localPart = parts[0];
   const domain = parts[1];
 
-  // Hum yeh check sirf official/major domains (like gmail) par lagayenge
+  // 1. Check for QQ.com domain (Spam domain)
+  if (domain === 'qq.com') {
+    return true;
+  }
+
+  // 2. Check for Gmail Tricks
   if (domain === 'gmail.com' || domain === 'googlemail.com') {
-    // 1. Plus Trick: Check if it contains '+'
+    // Plus Trick: Check if it contains '+'
     const hasPlus = localPart.includes('+');
     
-    // 2. Dot Trick: Check if local part has 2 or more dots
+    // Dot Trick: Check if local part has 2 or more dots
     const dotCount = (localPart.match(/\./g) || []).length;
     const tooManyDots = dotCount >= 2;
 
@@ -45,7 +50,7 @@ function isJune2nd(creationTimeStr) {
 }
 
 async function purgeJuneFakesAndDisableReferrers() {
-  console.log(`\n🛑 WARNING: Scanning for fake accounts (June 2) using dot/plus tricks...`);
+  console.log(`\n🛑 WARNING: Scanning for fake accounts (June 2) using dot/plus tricks & qq.com...`);
   
   try {
     const db = admin.database();
@@ -57,7 +62,7 @@ async function purgeJuneFakesAndDisableReferrers() {
       const listUsersResult = await admin.auth().listUsers(1000, nextPageToken);
       
       listUsersResult.users.forEach((userRecord) => {
-        if (isJune2nd(userRecord.metadata.creationTime) && isSuspiciousGmailPattern(userRecord.email)) {
+        if (isJune2nd(userRecord.metadata.creationTime) && isSuspiciousEmailPattern(userRecord.email)) {
             fakeUsersToProcess.push({
                 uid: userRecord.uid,
                 email: userRecord.email
@@ -69,7 +74,7 @@ async function purgeJuneFakesAndDisableReferrers() {
     } while (nextPageToken);
 
     if (fakeUsersToProcess.length === 0) {
-        console.log(`\n✅ Safe: Koi "Dot Trick" ya "Plus" wale accounts June 2 ki date mein nahi mile.`);
+        console.log(`\n✅ Safe: Koi "Dot/Plus Trick" ya "qq.com" wale accounts June 2 ki date mein nahi mile.`);
         process.exit(0);
     }
 
@@ -77,7 +82,7 @@ async function purgeJuneFakesAndDisableReferrers() {
     console.log(`Starting process to Delete Fakes & Disable their Referrers...\n`);
 
     let processedFakes = 0;
-    let referrersToDisable = new Set(); // Set use kar rahe hain taake duplicate referrers na aayen
+    let referrersToDisable = new Set(); // To avoid duplicate referrers
 
     // 2. Process Fake Accounts and extract Referrers
     for (const fakeUser of fakeUsersToProcess) {
@@ -118,7 +123,6 @@ async function purgeJuneFakesAndDisableReferrers() {
                 const snapshot = await db.ref('users').orderByChild('username').equalTo(referrerUsername).once('value');
                 
                 if (snapshot.exists()) {
-                    // Loop isliye kyunke ho sakta hai data object ho, halaanke result ek hi hoga
                     for (const [uid, data] of Object.entries(snapshot.val())) {
                         // Main abuser ko Auth mein disable kar dena
                         await admin.auth().updateUser(uid, { disabled: true });
@@ -126,7 +130,7 @@ async function purgeJuneFakesAndDisableReferrers() {
                         disabledCount++;
                     }
                 } else {
-                    console.log(`⚠️ Referrer '${referrerUsername}' not found in database. Maybe already deleted.`);
+                    console.log(`⚠️ Referrer '${referrerUsername}' not found in database.`);
                 }
             } catch (err) {
                 console.error(`❌ Error disabling referrer '${referrerUsername}':`, err.message);
