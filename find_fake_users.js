@@ -39,30 +39,20 @@ function isSuspiciousEmailPattern(email) {
   return false;
 }
 
-// Function: Check if created on June 2, 2026
-function isJune2nd(creationTimeStr) {
-  const creationDate = new Date(creationTimeStr);
-  const year = creationDate.getFullYear();
-  const month = creationDate.getMonth(); // 5 = June (0-indexed)
-  const date = creationDate.getDate();
-
-  return year === 2026 && month === 5 && date === 2;
-}
-
-async function purgeJuneFakesAndDisableReferrers() {
-  console.log(`\n🛑 WARNING: Scanning for fake accounts (June 2) using dot/plus tricks & qq.com...`);
+async function purgeAllFakesAndDisableReferrers() {
+  console.log(`\n🛑 WARNING: Scanning ALL accounts for dot/plus tricks & qq.com...`);
   
   try {
     const db = admin.database();
     let fakeUsersToProcess = [];
     let nextPageToken;
 
-    // 1. Find all fake accounts created on June 2
+    // 1. Find ALL fake accounts across the entire database history
     do {
       const listUsersResult = await admin.auth().listUsers(1000, nextPageToken);
       
       listUsersResult.users.forEach((userRecord) => {
-        if (isJune2nd(userRecord.metadata.creationTime) && isSuspiciousEmailPattern(userRecord.email)) {
+        if (isSuspiciousEmailPattern(userRecord.email)) {
             fakeUsersToProcess.push({
                 uid: userRecord.uid,
                 email: userRecord.email
@@ -74,11 +64,11 @@ async function purgeJuneFakesAndDisableReferrers() {
     } while (nextPageToken);
 
     if (fakeUsersToProcess.length === 0) {
-        console.log(`\n✅ Safe: Koi "Dot/Plus Trick" ya "qq.com" wale accounts June 2 ki date mein nahi mile.`);
+        console.log(`\n✅ Safe: Koi "Dot/Plus Trick" ya "qq.com" wale accounts nahi mile.`);
         process.exit(0);
     }
 
-    console.log(`\n⚠️ Total fake accounts found: ${fakeUsersToProcess.length}`);
+    console.log(`\n⚠️ Total fake accounts found globally: ${fakeUsersToProcess.length}`);
     console.log(`Starting process to Delete Fakes & Disable their Referrers...\n`);
 
     let processedFakes = 0;
@@ -92,7 +82,11 @@ async function purgeJuneFakesAndDisableReferrers() {
         const userData = userSnap.val();
 
         if (userData && userData.referredBy) {
-            referrersToDisable.add(userData.referredBy);
+            const referrer = userData.referredBy.toLowerCase();
+            // SAFEGUARD: Agar referrer 'starx' hai toh usay ignore karo
+            if (referrer !== 'starx') {
+                referrersToDisable.add(userData.referredBy);
+            }
         }
 
         // Fake account ko Auth se Hamesha ke liye Delete karna
@@ -114,10 +108,13 @@ async function purgeJuneFakesAndDisableReferrers() {
     
     // 3. Disable the main culprits (Referrers)
     if (referrersToDisable.size > 0) {
-        console.log(`⚠️ Found ${referrersToDisable.size} main referrers who invited these bots. Disabling them...`);
+        console.log(`⚠️ Found ${referrersToDisable.size} main referrers who invited these bots (Skipping 'starx'). Disabling them...`);
         let disabledCount = 0;
 
         for (const referrerUsername of referrersToDisable) {
+            // Ek aur safety check loop ke andar bhi
+            if (referrerUsername.toLowerCase() === 'starx') continue;
+
             try {
                 // Database mein username search kar ke uski UID nikalna
                 const snapshot = await db.ref('users').orderByChild('username').equalTo(referrerUsername).once('value');
@@ -146,4 +143,4 @@ async function purgeJuneFakesAndDisableReferrers() {
   }
 }
 
-purgeJuneFakesAndDisableReferrers();
+purgeAllFakesAndDisableReferrers();
