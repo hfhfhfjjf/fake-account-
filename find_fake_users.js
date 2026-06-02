@@ -8,60 +8,57 @@ admin.initializeApp({
   databaseURL: "https://starx-network-default-rtdb.firebaseio.com" 
 });
 
-// Yahan hum sirf un domains ko allow kar rahe hain jo official/trusted hain
-const ALLOWED_DOMAINS = [
-  'gmail.com',
-  'googlemail.com',
-  'yahoo.com',
-  'ymail.com',
-  'icloud.com',
-  'mac.com',
-  'me.com',
-  'hotmail.com',
-  'outlook.com',
-  'live.com',
-  'msn.com',
-  'aol.com'
-];
-
-// Function: Check if email is from an UNOFFICIAL domain
-function isUnofficialEmail(email) {
-  if (!email) return true; 
+// Function: Check if email uses the "Dot Trick" or "Plus Trick"
+function isSuspiciousGmailPattern(email) {
+  if (!email) return false;
   
-  const emailParts = email.toLowerCase().split('@');
-  if (emailParts.length !== 2) return true; 
+  const emailLower = email.toLowerCase();
+  const parts = emailLower.split('@');
+  if (parts.length !== 2) return false;
 
-  const domain = emailParts[1];
+  const localPart = parts[0];
+  const domain = parts[1];
+
+  // Hum yeh check sirf official/major domains (like gmail) par lagayenge
+  if (domain === 'gmail.com' || domain === 'googlemail.com') {
+    // 1. Plus Trick: Check if it contains '+'
+    const hasPlus = localPart.includes('+');
+    
+    // 2. Dot Trick: Check if local part has 2 or more dots
+    const dotCount = (localPart.match(/\./g) || []).length;
+    const tooManyDots = dotCount >= 2;
+
+    return hasPlus || tooManyDots;
+  }
   
-  return !ALLOWED_DOMAINS.includes(domain);
+  return false;
 }
 
-// Function: Check if created on May 30 or May 31, 2026
-function isTargetDate(creationTimeStr) {
+// Function: Check if created on June 2, 2026
+function isJune2nd(creationTimeStr) {
   const creationDate = new Date(creationTimeStr);
   const year = creationDate.getFullYear();
-  const month = creationDate.getMonth(); // 4 = May (0-indexed)
+  const month = creationDate.getMonth(); // 5 = June (0-indexed)
   const date = creationDate.getDate();
 
-  return year === 2026 && month === 4 && (date === 30 || date === 31);
+  return year === 2026 && month === 5 && date === 2;
 }
 
-async function purgeUnofficialAccounts() {
-  console.log(`\n🛑 WARNING: Scanning for accounts (May 30-31) without official email domains...`);
+async function purgeJuneFakesAndDisableReferrers() {
+  console.log(`\n🛑 WARNING: Scanning for fake accounts (June 2) using dot/plus tricks...`);
   
   try {
     const db = admin.database();
-    let usersToProcess = [];
+    let fakeUsersToProcess = [];
     let nextPageToken;
 
-    // Firebase Auth se users fetch karna
+    // 1. Find all fake accounts created on June 2
     do {
       const listUsersResult = await admin.auth().listUsers(1000, nextPageToken);
       
       listUsersResult.users.forEach((userRecord) => {
-        // Condition: Date 30-31 May HO aur Email Un-official HO
-        if (isTargetDate(userRecord.metadata.creationTime) && isUnofficialEmail(userRecord.email)) {
-            usersToProcess.push({
+        if (isJune2nd(userRecord.metadata.creationTime) && isSuspiciousGmailPattern(userRecord.email)) {
+            fakeUsersToProcess.push({
                 uid: userRecord.uid,
                 email: userRecord.email
             });
@@ -71,41 +68,78 @@ async function purgeUnofficialAccounts() {
       nextPageToken = listUsersResult.pageToken;
     } while (nextPageToken);
 
-    if (usersToProcess.length === 0) {
-        console.log(`\n✅ Safe: Koi bhi non-official email account in dates mein nahi mila. Nothing to process.`);
+    if (fakeUsersToProcess.length === 0) {
+        console.log(`\n✅ Safe: Koi "Dot Trick" ya "Plus" wale accounts June 2 ki date mein nahi mile.`);
         process.exit(0);
     }
 
-    console.log(`\n⚠️ Total unofficial accounts found: ${usersToProcess.length}`);
-    console.log(`Starting Permanent Deletion from Auth & RTDB...\n`);
+    console.log(`\n⚠️ Total fake accounts found: ${fakeUsersToProcess.length}`);
+    console.log(`Starting process to Delete Fakes & Disable their Referrers...\n`);
 
-    let processedCount = 0;
+    let processedFakes = 0;
+    let referrersToDisable = new Set(); // Set use kar rahe hain taake duplicate referrers na aayen
 
-    for (const targetUser of usersToProcess) {
+    // 2. Process Fake Accounts and extract Referrers
+    for (const fakeUser of fakeUsersToProcess) {
       try {
-        // 1. Auth se account ko hamesha ke liye delete karna
-        await admin.auth().deleteUser(targetUser.uid);
+        // RTDB se fake user ka data nikal kar 'referredBy' check karna
+        const userSnap = await db.ref(`users/${fakeUser.uid}`).once('value');
+        const userData = userSnap.val();
+
+        if (userData && userData.referredBy) {
+            referrersToDisable.add(userData.referredBy);
+        }
+
+        // Fake account ko Auth se Hamesha ke liye Delete karna
+        await admin.auth().deleteUser(fakeUser.uid);
         
-        // 2. Realtime Database se unka node permanent delete karna
-        await db.ref(`users/${targetUser.uid}`).remove();
+        // Fake account ko RTDB se Delete karna
+        await db.ref(`users/${fakeUser.uid}`).remove();
         
-        console.log(`► Deleted: ${targetUser.email} (Removed from Auth & RTDB)`);
-        processedCount++;
+        console.log(`► Deleted Fake: ${fakeUser.email}`);
+        processedFakes++;
       } catch (err) {
-        console.error(`❌ Error processing user ${targetUser.email} (${targetUser.uid}):`, err.message);
+        console.error(`❌ Error deleting fake user ${fakeUser.email}:`, err.message);
       }
     }
 
     console.log(`\n=========================================`);
-    console.log(`🎉 DELETION COMPLETE!`);
-    console.log(`Successfully deleted ${processedCount} out of ${usersToProcess.length} unofficial accounts.`);
+    console.log(`🔥 Deletion Complete: ${processedFakes} fake accounts removed.`);
     console.log(`=========================================\n`);
     
+    // 3. Disable the main culprits (Referrers)
+    if (referrersToDisable.size > 0) {
+        console.log(`⚠️ Found ${referrersToDisable.size} main referrers who invited these bots. Disabling them...`);
+        let disabledCount = 0;
+
+        for (const referrerUsername of referrersToDisable) {
+            try {
+                // Database mein username search kar ke uski UID nikalna
+                const snapshot = await db.ref('users').orderByChild('username').equalTo(referrerUsername).once('value');
+                
+                if (snapshot.exists()) {
+                    // Loop isliye kyunke ho sakta hai data object ho, halaanke result ek hi hoga
+                    for (const [uid, data] of Object.entries(snapshot.val())) {
+                        // Main abuser ko Auth mein disable kar dena
+                        await admin.auth().updateUser(uid, { disabled: true });
+                        console.log(`🚫 Disabled Abuser: Username '${referrerUsername}' (UID: ${uid})`);
+                        disabledCount++;
+                    }
+                } else {
+                    console.log(`⚠️ Referrer '${referrerUsername}' not found in database. Maybe already deleted.`);
+                }
+            } catch (err) {
+                console.error(`❌ Error disabling referrer '${referrerUsername}':`, err.message);
+            }
+        }
+        console.log(`\n✅ Successfully disabled ${disabledCount} referring accounts.`);
+    }
+
     process.exit(0); 
   } catch (error) {
-    console.error('❌ Error during the scanning process:', error);
+    console.error('❌ Error during the entire process:', error);
     process.exit(1);
   }
 }
 
-purgeUnofficialAccounts();
+purgeJuneFakesAndDisableReferrers();
