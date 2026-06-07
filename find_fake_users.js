@@ -8,37 +8,11 @@ admin.initializeApp({
   databaseURL: "https://starx-network-default-rtdb.firebaseio.com" 
 });
 
-// Yahan hum sirf un domains ko allow kar rahe hain jo official/trusted hain
-const ALLOWED_DOMAINS = [
-  'gmail.com',
-  'googlemail.com',
-  'yahoo.com',
-  'ymail.com',
-  'icloud.com',
-  'mac.com',
-  'me.com',
-  'hotmail.com',
-  'outlook.com',
-  'live.com',
-  'msn.com',
-  'aol.com'
-];
+// Target referral code
+const TARGET_REFERRAL = "utrader";
 
-// Function: Check if email is from an UNOFFICIAL domain (like merepost.com)
-function isUnofficialEmail(email) {
-  if (!email) return true; // Agar email missing hai toh usko bhi filter karo
-  
-  const emailParts = email.toLowerCase().split('@');
-  if (emailParts.length !== 2) return true; // Invalid format
-
-  const domain = emailParts[1];
-  
-  // Agar domain ALLOWED_DOMAINS list mein NAHI hai, toh yeh un-official/spam hai
-  return !ALLOWED_DOMAINS.includes(domain);
-}
-
-// Function: Check if created strictly on June 6 or June 7, 2026
-function isJune6or7(creationTimeStr) {
+// Function: Check if created strictly on June 4, 5, 6, or 7, 2026
+function isTargetDate(creationTimeStr) {
   if (!creationTimeStr) return false;
   
   const creationDate = new Date(creationTimeStr);
@@ -46,63 +20,61 @@ function isJune6or7(creationTimeStr) {
   const month = creationDate.getMonth(); // 5 = June (0-indexed)
   const date = creationDate.getDate();
 
-  return year === 2026 && month === 5 && (date === 6 || date === 7);
+  // Check if date is 4, 5, 6, or 7
+  return year === 2026 && month === 5 && [4, 5, 6, 7].includes(date);
 }
 
-async function purgeUnofficialFakesOnly() {
-  console.log(`\n🛑 WARNING: Scanning for accounts (June 6 & 7 ONLY) without official email domains...`);
+async function purgeSpecificReferrals() {
+  console.log(`\n🛑 WARNING: Scanning for accounts referred by '${TARGET_REFERRAL}' created between June 4 and June 7...`);
   
   try {
     const db = admin.database();
-    let fakeUsersToProcess = [];
-    let nextPageToken;
 
-    // 1. Find the specific fake accounts
-    do {
-      const listUsersResult = await admin.auth().listUsers(1000, nextPageToken);
-      
-      listUsersResult.users.forEach((userRecord) => {
-        // Condition: Date 6-7 June HO aur Email Un-official HO
-        if (isJune6or7(userRecord.metadata.creationTime) && isUnofficialEmail(userRecord.email)) {
-            fakeUsersToProcess.push({
-                uid: userRecord.uid,
-                email: userRecord.email
-            });
-        }
-      });
-      
-      nextPageToken = listUsersResult.pageToken;
-    } while (nextPageToken);
+    // Database se directly un users ko uthana jinhone yeh code use kiya hai
+    // Yeh pure Auth list ko scan karne se bohut zyada fast hai
+    console.log(`Querying database for referral code: ${TARGET_REFERRAL}...`);
+    const snapshot = await db.ref('users').orderByChild('referredBy').equalTo(TARGET_REFERRAL).once('value');
+    const usersData = snapshot.val();
 
-    if (fakeUsersToProcess.length === 0) {
-        console.log(`\n✅ Safe: Koi bhi non-official email account (June 6-7) mein nahi mila. Nothing to process.`);
+    if (!usersData) {
+        console.log(`\n✅ Safe: Koi bhi account database mein nahi mila jisne '${TARGET_REFERRAL}' use kiya ho.`);
         process.exit(0);
     }
 
-    console.log(`\n⚠️ Total unofficial accounts found: ${fakeUsersToProcess.length}`);
-    console.log(`Starting process to Delete Fakes ONLY (Referrers will NOT be disabled)...\n`);
+    const uidsToCheck = Object.keys(usersData);
+    console.log(`⚠️ Found ${uidsToCheck.length} total accounts using this referral code. Checking dates...\n`);
 
     let processedFakes = 0;
 
-    // 2. Process Fake Accounts (Delete from Auth & RTDB)
-    for (const fakeUser of fakeUsersToProcess) {
+    // Har targeted user ka data process karna
+    for (const uid of uidsToCheck) {
       try {
-        // Fake account ko Auth se hamesha ke liye delete karna
-        await admin.auth().deleteUser(fakeUser.uid);
-        
-        // Fake account ko RTDB se permanent delete karna
-        await db.ref(`users/${fakeUser.uid}`).remove();
-        
-        console.log(`► Deleted Fake: ${fakeUser.email}`);
-        processedFakes++;
+        // Har user ki creation date Auth se verify karna
+        const userRecord = await admin.auth().getUser(uid);
+
+        if (isTargetDate(userRecord.metadata.creationTime)) {
+            // Condition match ho gayi (Date 4, 5, 6, ya 7 June hai)
+            await admin.auth().deleteUser(uid);
+            await db.ref(`users/${uid}`).remove();
+            
+            const exactDate = new Date(userRecord.metadata.creationTime).getDate();
+            console.log(`► Deleted Fake: ${userRecord.email || uid} (Date matched: June ${exactDate})`);
+            processedFakes++;
+        }
       } catch (err) {
-        console.error(`❌ Error deleting fake user ${fakeUser.email}:`, err.message);
+        // Agar account Auth se pehle hi delete ho chuka hai lekin RTDB mein para hai (orphan data)
+        if (err.code === 'auth/user-not-found') {
+            await db.ref(`users/${uid}`).remove();
+            console.log(`► Cleaned Ghost Record from Database: UID [${uid}]`);
+            processedFakes++;
+        } else {
+            console.error(`❌ Error checking user ${uid}:`, err.message);
+        }
       }
     }
 
     console.log(`\n=========================================`);
     console.log(`🔥 Deletion Complete: ${processedFakes} targeted accounts removed.`);
-    console.log(`✅ Referrers were NOT touched.`);
     console.log(`=========================================\n`);
     
     process.exit(0); 
@@ -112,4 +84,4 @@ async function purgeUnofficialFakesOnly() {
   }
 }
 
-purgeUnofficialFakesOnly();
+purgeSpecificReferrals();
