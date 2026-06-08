@@ -8,37 +8,28 @@ admin.initializeApp({
   databaseURL: "https://starx-network-default-rtdb.firebaseio.com" 
 });
 
-// Yahan hum sirf un domains ko allow kar rahe hain jo official/trusted hain
-const ALLOWED_DOMAINS = [
-  'gmail.com',
-  'googlemail.com',
-  'yahoo.com',
-  'ymail.com',
-  'icloud.com',
-  'mac.com',
-  'me.com',
-  'hotmail.com',
-  'outlook.com',
-  'live.com',
-  'msn.com',
-  'aol.com'
-];
-
-// Function: Check if email is from an UNOFFICIAL domain
-function isUnofficialEmail(email) {
-  if (!email) return true; // Agar email missing hai toh usko bhi spam samjho
+// Function: Check if Gmail has 4 or more dots (Spam pattern)
+function hasHeavyDotTrick(email) {
+  if (!email) return false;
   
-  const emailParts = email.toLowerCase().split('@');
-  if (emailParts.length !== 2) return true; 
+  const emailLower = email.toLowerCase();
+  const parts = emailLower.split('@');
+  if (parts.length !== 2) return false;
 
-  const domain = emailParts[1];
+  const localPart = parts[0];
+  const domain = parts[1];
+
+  if (domain === 'gmail.com' || domain === 'googlemail.com') {
+    // Check if the local part contains 4 or more dots
+    const dotCount = (localPart.match(/\./g) || []).length;
+    return dotCount >= 4;
+  }
   
-  // Agar domain hamari ALLOWED_DOMAINS list mein NAHI hai, toh yeh un-official/spam hai
-  return !ALLOWED_DOMAINS.includes(domain);
+  return false;
 }
 
-// Function: Check if created strictly on June 6, 7, or 8, 2026
-function isTargetDate(creationTimeStr) {
+// Function: Check if created strictly on June 8, 2026
+function isJune8th(creationTimeStr) {
   if (!creationTimeStr) return false;
   
   const creationDate = new Date(creationTimeStr);
@@ -46,28 +37,26 @@ function isTargetDate(creationTimeStr) {
   const month = creationDate.getMonth(); // 5 = June (0-indexed)
   const date = creationDate.getDate();
 
-  // Check if year is 2026, month is June, and date is 6, 7, or 8
-  return year === 2026 && month === 5 && [6, 7, 8].includes(date);
+  return year === 2026 && month === 5 && date === 8;
 }
 
-async function purgeUnofficialFakesOnly() {
-  console.log(`\n🛑 WARNING: Scanning for unofficial email accounts created on June 6, 7, and 8 ONLY...`);
+async function purgeJune8Fakes() {
+  console.log(`\n🛑 WARNING: Scanning for heavy Gmail dot tricks (4+ dots) created on June 8 ONLY...`);
   
   try {
     const db = admin.database();
     let fakeUsersToProcess = [];
     let nextPageToken;
 
-    // 1. Find the specific fake accounts from Auth
+    // 1. Auth se list fetch kar ke filter karna
     do {
       const listUsersResult = await admin.auth().listUsers(1000, nextPageToken);
       
       listUsersResult.users.forEach((userRecord) => {
-        // Condition: Date 6, 7, 8 June HO aur Email Un-official HO
-        if (isTargetDate(userRecord.metadata.creationTime) && isUnofficialEmail(userRecord.email)) {
+        if (isJune8th(userRecord.metadata.creationTime) && hasHeavyDotTrick(userRecord.email)) {
             fakeUsersToProcess.push({
                 uid: userRecord.uid,
-                email: userRecord.email || 'No Email'
+                email: userRecord.email
             });
         }
       });
@@ -76,25 +65,25 @@ async function purgeUnofficialFakesOnly() {
     } while (nextPageToken);
 
     if (fakeUsersToProcess.length === 0) {
-        console.log(`\n✅ Safe: In dates (June 6-8) mein unofficial domains wale koi accounts nahi mile.`);
+        console.log(`\n✅ Safe: Aaj ki date (June 8) mein aisa koi dot trick account nahi mila.`);
         process.exit(0);
     }
 
-    console.log(`\n⚠️ Total unofficial accounts found: ${fakeUsersToProcess.length}`);
-    console.log(`Starting process to Delete Fakes...\n`);
+    console.log(`\n⚠️ Total targeted fake accounts found: ${fakeUsersToProcess.length}`);
+    console.log(`Starting permanent deletion process...\n`);
 
     let processedFakes = 0;
 
-    // 2. Process Fake Accounts (Delete from Auth & RTDB)
+    // 2. Clear from Auth and RTDB
     for (const fakeUser of fakeUsersToProcess) {
       try {
-        // Fake account ko Auth se hamesha ke liye delete karna
+        // Auth se delete
         await admin.auth().deleteUser(fakeUser.uid);
         
-        // Fake account ko RTDB se permanent delete karna
+        // Realtime Database se delete
         await db.ref(`users/${fakeUser.uid}`).remove();
         
-        console.log(`► Deleted Fake: ${fakeUser.email} (UID: ${fakeUser.uid})`);
+        console.log(`► Deleted Fake: ${fakeUser.email}`);
         processedFakes++;
       } catch (err) {
         console.error(`❌ Error deleting fake user ${fakeUser.email}:`, err.message);
@@ -102,7 +91,7 @@ async function purgeUnofficialFakesOnly() {
     }
 
     console.log(`\n=========================================`);
-    console.log(`🔥 Deletion Complete: ${processedFakes} unofficial accounts removed.`);
+    console.log(`🔥 Deletion Complete: ${processedFakes} heavy dot-trick accounts removed.`);
     console.log(`=========================================\n`);
     
     process.exit(0); 
@@ -112,4 +101,4 @@ async function purgeUnofficialFakesOnly() {
   }
 }
 
-purgeUnofficialFakesOnly();
+purgeJune8Fakes();
