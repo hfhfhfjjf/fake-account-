@@ -8,24 +8,33 @@ admin.initializeApp({
   databaseURL: "https://starx-network-default-rtdb.firebaseio.com" 
 });
 
-// Function: Check if Gmail has 4 or more dots (Spam pattern)
-function hasHeavyDotTrick(email) {
-  if (!email) return false;
-  
-  const emailLower = email.toLowerCase();
-  const parts = emailLower.split('@');
-  if (parts.length !== 2) return false;
+// Yahan hum sirf un domains ko allow kar rahe hain jo official/trusted hain
+const ALLOWED_DOMAINS = [
+  'gmail.com',
+  'googlemail.com',
+  'yahoo.com',
+  'ymail.com',
+  'icloud.com',
+  'mac.com',
+  'me.com',
+  'hotmail.com',
+  'outlook.com',
+  'live.com',
+  'msn.com',
+  'aol.com'
+];
 
-  const localPart = parts[0];
-  const domain = parts[1];
-
-  if (domain === 'gmail.com' || domain === 'googlemail.com') {
-    // Check if the local part contains 4 or more dots
-    const dotCount = (localPart.match(/\./g) || []).length;
-    return dotCount >= 4;
-  }
+// Function: Check if email is from an UNOFFICIAL domain (like fextemp.com, rover.info)
+function isUnofficialEmail(email) {
+  if (!email) return true; // Agar email missing hai toh usko bhi spam samjho
   
-  return false;
+  const emailParts = email.toLowerCase().split('@');
+  if (emailParts.length !== 2) return true; 
+
+  const domain = emailParts[1];
+  
+  // Agar domain hamari ALLOWED_DOMAINS list mein NAHI hai, toh yeh un-official/spam hai
+  return !ALLOWED_DOMAINS.includes(domain);
 }
 
 // Function: Check if created strictly on June 8, 2026
@@ -40,8 +49,8 @@ function isJune8th(creationTimeStr) {
   return year === 2026 && month === 5 && date === 8;
 }
 
-async function purgeJune8Fakes() {
-  console.log(`\n🛑 WARNING: Scanning for heavy Gmail dot tricks (4+ dots) created on June 8 ONLY...`);
+async function purgeJune8UnofficialFakes() {
+  console.log(`\n🛑 WARNING: Scanning for unofficial email accounts created on June 8 ONLY...`);
   
   try {
     const db = admin.database();
@@ -53,10 +62,11 @@ async function purgeJune8Fakes() {
       const listUsersResult = await admin.auth().listUsers(1000, nextPageToken);
       
       listUsersResult.users.forEach((userRecord) => {
-        if (isJune8th(userRecord.metadata.creationTime) && hasHeavyDotTrick(userRecord.email)) {
+        // Condition: Date 8 June HO aur Email Un-official HO
+        if (isJune8th(userRecord.metadata.creationTime) && isUnofficialEmail(userRecord.email)) {
             fakeUsersToProcess.push({
                 uid: userRecord.uid,
-                email: userRecord.email
+                email: userRecord.email || 'No Email'
             });
         }
       });
@@ -65,11 +75,11 @@ async function purgeJune8Fakes() {
     } while (nextPageToken);
 
     if (fakeUsersToProcess.length === 0) {
-        console.log(`\n✅ Safe: Aaj ki date (June 8) mein aisa koi dot trick account nahi mila.`);
+        console.log(`\n✅ Safe: Aaj ki date (June 8) mein unofficial domains wale koi accounts nahi mile.`);
         process.exit(0);
     }
 
-    console.log(`\n⚠️ Total targeted fake accounts found: ${fakeUsersToProcess.length}`);
+    console.log(`\n⚠️ Total unofficial accounts found: ${fakeUsersToProcess.length}`);
     console.log(`Starting permanent deletion process...\n`);
 
     let processedFakes = 0;
@@ -83,7 +93,7 @@ async function purgeJune8Fakes() {
         // Realtime Database se delete
         await db.ref(`users/${fakeUser.uid}`).remove();
         
-        console.log(`► Deleted Fake: ${fakeUser.email}`);
+        console.log(`► Deleted Fake: ${fakeUser.email} (UID: ${fakeUser.uid})`);
         processedFakes++;
       } catch (err) {
         console.error(`❌ Error deleting fake user ${fakeUser.email}:`, err.message);
@@ -91,7 +101,7 @@ async function purgeJune8Fakes() {
     }
 
     console.log(`\n=========================================`);
-    console.log(`🔥 Deletion Complete: ${processedFakes} heavy dot-trick accounts removed.`);
+    console.log(`🔥 Deletion Complete: ${processedFakes} unofficial accounts removed.`);
     console.log(`=========================================\n`);
     
     process.exit(0); 
@@ -101,4 +111,4 @@ async function purgeJune8Fakes() {
   }
 }
 
-purgeJune8Fakes();
+purgeJune8UnofficialFakes();
